@@ -16,10 +16,14 @@
 
 import { injectable, inject, postConstruct } from 'inversify';
 import URI from '@theia/core/lib/common/uri';
+import { Emitter, Event } from '@theia/core/lib/common/event';
 import { BaseLanguageClientContribution, Workspace, Languages, LanguageClientFactory, ILanguageClient, State } from '@theia/languages/lib/browser';
 import { TypeScriptInitializationOptions, TypeScriptInitializeResult } from 'typescript-language-server/lib/ts-protocol';
-import { TYPESCRIPT_LANGUAGE_ID, TYPESCRIPT_LANGUAGE_NAME, TYPESCRIPT_REACT_LANGUAGE_ID, JAVASCRIPT_LANGUAGE_ID, JAVASCRIPT_REACT_LANGUAGE_ID } from '../common';
+import {
+    TYPESCRIPT_LANGUAGE_ID, TYPESCRIPT_LANGUAGE_NAME, TYPESCRIPT_REACT_LANGUAGE_ID, JAVASCRIPT_LANGUAGE_ID, JAVASCRIPT_REACT_LANGUAGE_ID, TypescriptStartParams
+} from '../common';
 import { TypescriptPreferences } from './typescript-preferences';
+import { TypescriptVersion } from '../common/typescript-version-service';
 
 @injectable()
 export class TypeScriptClientContribution extends BaseLanguageClientContribution {
@@ -29,6 +33,9 @@ export class TypeScriptClientContribution extends BaseLanguageClientContribution
 
     @inject(TypescriptPreferences)
     protected readonly preferences: TypescriptPreferences;
+
+    protected readonly onDidChangeVersionEmitter = new Emitter<TypescriptVersion | undefined>();
+    readonly onDidChangeVersion: Event<TypescriptVersion | undefined> = this.onDidChangeVersionEmitter.event;
 
     constructor(
         @inject(Workspace) protected readonly workspace: Workspace,
@@ -45,6 +52,25 @@ export class TypeScriptClientContribution extends BaseLanguageClientContribution
                 this.restart();
             }
         });
+        this.onDidChangeVersion(() => this.restart());
+    }
+
+    protected _version: TypescriptVersion | undefined;
+    get version(): TypescriptVersion | undefined {
+        return this._version;
+    }
+    set version(version: TypescriptVersion | undefined) {
+        if (TypescriptVersion.equals(this._version, version)) {
+            return;
+        }
+        this._version = version;
+        this.onDidChangeVersionEmitter.fire(this._version);
+    }
+
+    get startParameters(): TypescriptStartParams {
+        return {
+            version: this._version
+        };
     }
 
     protected get documentSelector(): string[] {
