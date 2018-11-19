@@ -24,7 +24,7 @@
 .theia-git:focus, .theia-git :focus {
     outline: 0;
     box-shadow: none;
-    border: none;
+    border: 1px solid var(--theia-border-color0);
 }
 
 #theia-gitContainer .flexcontainer {
