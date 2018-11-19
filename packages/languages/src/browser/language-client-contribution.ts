@@ -19,7 +19,7 @@
 import { injectable, inject } from 'inversify';
 import { MessageService, CommandRegistry } from '@theia/core';
 import { Disposable, DisposableCollection } from '@theia/core/lib/common';
-import { FrontendApplication, WebSocketConnectionProvider, WebSocketOptions } from '@theia/core/lib/browser';
+import { FrontendApplication, WebSocketConnectionProvider } from '@theia/core/lib/browser';
 import {
     LanguageContribution, ILanguageClient, LanguageClientOptions,
     DocumentSelector, TextDocument, FileSystemWatcher,
@@ -54,6 +54,7 @@ export abstract class BaseLanguageClientContribution implements LanguageClientCo
     @inject(MessageService) protected readonly messageService: MessageService;
     @inject(CommandRegistry) protected readonly registry: CommandRegistry;
     @inject(WorkspaceService) protected readonly workspaceService: WorkspaceService;
+    @inject(LanguageContribution.Service) protected readonly languageContributionService: LanguageContribution.Service;
     @inject(WebSocketConnectionProvider) protected readonly connectionProvider: WebSocketConnectionProvider;
 
     constructor(
@@ -106,11 +107,13 @@ export abstract class BaseLanguageClientContribution implements LanguageClientCo
     deactivate(): void {
         this.toDeactivate.dispose();
     }
-    protected doActivate(toDeactivate: DisposableCollection): void {
-        const options: WebSocketOptions = {};
-        toDeactivate.push(Disposable.create(() => options.reconnecting = false));
+    protected async doActivate(toDeactivate: DisposableCollection): Promise<void> {
+        let restart = true;
+        toDeactivate.push(Disposable.create(() => restart = false));
+        const sessionId = await this.languageContributionService.create(this.id, this.startParameters);
+        toDeactivate.push(Disposable.create(() => this.languageContributionService.destroy(sessionId)));
         this.connectionProvider.listen({
-            path: LanguageContribution.getPath(this),
+            path: LanguageContribution.getPath(this, sessionId),
             onConnection: messageConnection => {
                 if (toDeactivate.disposed) {
                     messageConnection.dispose();
@@ -119,15 +122,16 @@ export abstract class BaseLanguageClientContribution implements LanguageClientCo
                 const languageClient = this.createLanguageClient(messageConnection);
                 this.onWillStart(languageClient);
                 toDeactivate.pushAll([
+                    messageConnection.onClose(() => {
+                        if (restart) {
+                            this.restart();
+                        }
+                    }),
                     messageConnection,
-                    this.toRestart.push(Disposable.create(async () => {
-                        await languageClient.onReady();
-                        languageClient.stop();
-                    })),
                     languageClient.start()
                 ]);
             }
-        }, options);
+        }, { reconnecting: false });
     }
 
     protected state: State | undefined;
@@ -135,9 +139,9 @@ export abstract class BaseLanguageClientContribution implements LanguageClientCo
         return !this.toDeactivate.disposed && this.state === State.Running;
     }
 
-    protected readonly toRestart = new DisposableCollection();
     restart(): void {
-        this.toRestart.dispose();
+        this.deactivate();
+        this.activate();
     }
 
     protected onWillStart(languageClient: ILanguageClient): void {
@@ -183,6 +187,10 @@ export abstract class BaseLanguageClientContribution implements LanguageClientCo
             }
         });
         return false;
+    }
+
+    protected get startParameters(): any {
+        return undefined;
     }
 
     // tslint:disable-next-line:no-any
